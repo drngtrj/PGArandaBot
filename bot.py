@@ -6,6 +6,7 @@ from openai import OpenAI
 TELEGRAM_TOKEN = os.getenv("8666433188:AAFyo56YJPNngSk0phnYqv-meTjLXUCGB00")
 OPENAI_API_KEY = os.getenv("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")
 
+print("TOKEN:", TELEGRAM_TOKEN)
 print("API KEY:", OPENAI_API_KEY)
 
 client = OpenAI(api_key=OPENAI_API_KEY)
@@ -29,3 +30,4 @@ app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, responder))
 
 
 app.run_polling()
+
