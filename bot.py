@@ -3,7 +3,7 @@ from telegram import Update
 from telegram.ext import ApplicationBuilder, MessageHandler, filters, ContextTypes
 from openai import OpenAI
 
-TELEGRAM_TOKEN = os.getenv("8666433188:AAFyo56YJPNngSk0phnYqv-meTjLXUCGB00")
+TELEGRAM_TOKEN = "8666433188:AAFyo56YJPNngSk0phnYqv-meTjLXUCGB00"
 OPENAI_API_KEY = "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"
 
 print("TOKEN:", TELEGRAM_TOKEN)
@@ -30,5 +30,6 @@ app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, responder))
 
 
 app.run_polling()
+
 
 
