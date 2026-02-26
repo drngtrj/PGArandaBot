@@ -4,7 +4,7 @@ from telegram.ext import ApplicationBuilder, MessageHandler, filters, ContextTyp
 from openai import OpenAI
 
 TELEGRAM_TOKEN = "8666433188:AAFyo56YJPNngSk0phnYqv-meTjLXUCGB00"
-OPENAI_API_KEY = "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"
+OPENAI_API_KEY = "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"
 
 print("TOKEN:", TELEGRAM_TOKEN)
 print("API KEY:", OPENAI_API_KEY)
@@ -30,6 +30,7 @@ app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, responder))
 
 
 app.run_polling()
+
 
 
 
