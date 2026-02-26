@@ -1,44 +1,39 @@
 import os
-import requests
 from telegram import Update
 from telegram.ext import ApplicationBuilder, MessageHandler, filters, ContextTypes
+from openai import OpenAI
 
-# Variables de entorno (ponelas en Railway: Settings → Environment Variables)
-TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN")
-HF_API_KEY = os.environ.get("HF_API_KEY")
-HF_MODEL = "facebook/bart-large-cnn"  # modelo de resumen
+# Tokens y claves
+TELEGRAM_TOKEN = os.environ["TELEGRAM_TOKEN"]
+OPENAI_API_KEY = os.environ["OPENAI_API_KEY"]
+WEBHOOK_URL = os.environ["WEBHOOK_URL"]
 
-HEADERS = {"Authorization": f"Bearer {HF_API_KEY}"}
-HF_API_URL = f"https://api-inference.huggingface.co/models/{HF_MODEL}"
+# Cliente OpenAI / Hugging Face
+client = OpenAI(api_key=OPENAI_API_KEY)
 
-
-# Función para resumir texto usando Hugging Face
-def resumir_texto(texto):
-    payload = {"inputs": texto}
-    response = requests.post(HF_API_URL, headers=HEADERS, json=payload)
-    data = response.json()
-    if "error" in data:
-        return f"Error al resumir: {data['error']}"
-    return data[0]["summary_text"]
-
-
-# Función que responde a los mensajes en Telegram
+# Función que resume mensajes
 async def responder(update: Update, context: ContextTypes.DEFAULT_TYPE):
     texto_usuario = update.message.text
-    resumen = resumir_texto(texto_usuario)
-    await update.message.reply_text(resumen)
 
+    # Llamada a la API para resumir
+    respuesta = client.chat.completions.create(
+        model="gpt-4o-mini",
+        messages=[
+            {"role": "system", "content": "Resumir y responder de forma clara y breve."},
+            {"role": "user", "content": texto_usuario}
+        ]
+    )
 
-# Configuración de la app con Webhook (para Railway)
+    # Enviar respuesta resumida
+    await update.message.reply_text(respuesta.choices[0].message.content)
+
+# Crear la app de Telegram
 app = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
 app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, responder))
 
-# Usar Webhook en vez de polling
-WEBHOOK_URL = os.environ.get("WEBHOOK_URL")  # tu URL de Railway, ej: https://miapp.up.railway.app
-
-# Arranca el webhook
+# Ejecutar webhook
 app.run_webhook(
     listen="0.0.0.0",
     port=int(os.environ.get("PORT", 8000)),
-    webhook_url=os.environ.get("WEBHOOK_URL")
+    webhook_url=WEBHOOK_URL
 )
