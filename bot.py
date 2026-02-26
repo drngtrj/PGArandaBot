@@ -5,11 +5,11 @@ from openai import OpenAI
 
 # Tokens y claves
 TELEGRAM_TOKEN = os.environ["TELEGRAM_TOKEN"]
-OPENAI_API_KEY = os.environ["OPENAI_API_KEY"]
+HF_API_KEY = os.environ["HF_API_KEY"]
 WEBHOOK_URL = os.environ["WEBHOOK_URL"]
 
 # Cliente OpenAI / Hugging Face
-client = OpenAI(api_key=OPENAI_API_KEY)
+client = OpenAI(api_key=HF_API_KEY)
 
 # Función que resume mensajes
 async def responder(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -37,3 +37,4 @@ app.run_webhook(
     port=int(os.environ.get("PORT", 8000)),
     webhook_url=WEBHOOK_URL
 )
+
