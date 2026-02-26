@@ -40,5 +40,6 @@ WEBHOOK_URL = os.environ.get("WEBHOOK_URL")  # tu URL de Railway, ej: https://mi
 app.run_webhook(
     listen="0.0.0.0",
     port=int(os.environ.get("PORT", 8000)),
-    webhook_url=WEBHOOK_URL
+    webhook_url=os.environ.get("WEBHOOK_URL"),  # debe ser https://pgarandabot-production.up.railway.app/webhook
+    webhook_path="/webhook"
 )
