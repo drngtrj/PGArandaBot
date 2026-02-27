@@ -118,11 +118,12 @@ async def listar_datos(update: Update, context: ContextTypes.DEFAULT_TYPE):
 app = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
 
 # Comandos
-app.add_handler(CommandHandler("start", start))
-app.add_handler(CommandHandler("evento", crear_evento))
-app.add_handler(CommandHandler("menu", mostrar_eventos))
-app.add_handler(CommandHandler("datos", listar_datos))
-
+comandos = [
+    app.add_handler(CommandHandler("start", start))
+    app.add_handler(CommandHandler("evento", crear_evento))
+    app.add_handler(CommandHandler("menu", mostrar_eventos))
+    app.add_handler(CommandHandler("datos", listar_datos))
+]
 # Registrar comandos en Telegram
 app.bot.set_my_commands(comandos)
 
@@ -144,5 +145,6 @@ if __name__ == "__main__":
     #     port=int(os.environ.get("PORT", 8000)),
     #     webhook_url=WEBHOOK_URL
     # )
+
 
 
