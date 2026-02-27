@@ -1,9 +1,8 @@
 import os
-import asyncio
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
-    ApplicationBuilder, CommandHandler, MessageHandler, ContextTypes,
-    CallbackQueryHandler, filters
+    ApplicationBuilder, CommandHandler, MessageHandler, CallbackQueryHandler,
+    ContextTypes, filters
 )
 import httpx
 
@@ -19,20 +18,16 @@ async def procesar_texto_ia(texto: str) -> str:
     """Procesa texto con HuggingFace y devuelve resumen"""
     url = "https://api-inference.huggingface.co/models/google/flan-t5-small"
     headers = {"Authorization": f"Bearer {HF_API_KEY}"}
-    payload = {
-        "inputs": f"Resume este texto en pocas palabras: {texto}",
-    }
+    payload = {"inputs": f"Resume este texto en pocas palabras: {texto}"}
 
     try:
         async with httpx.AsyncClient(timeout=30) as client:
             r = await client.post(url, headers=headers, json=payload)
             r.raise_for_status()
             resultado = r.json()
-            # HuggingFace devuelve lista con 'generated_text'
             if isinstance(resultado, list) and "generated_text" in resultado[0]:
                 return resultado[0]["generated_text"]
-            else:
-                return "No se pudo resumir el texto con IA."
+            return "No se pudo resumir el texto con IA."
     except Exception as e:
         return f"No se pudo procesar con IA: {e}"
 
@@ -50,8 +45,6 @@ async def nuevo_evento(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     nombre_evento = " ".join(context.args)
     await update.message.reply_text(f"Envíame la descripción del evento '{nombre_evento}'")
-
-    # Guardamos temporalmente el nombre del evento en context.user_data
     context.user_data["nombre_evento"] = nombre_evento
 
 async def texto_evento(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -66,9 +59,7 @@ async def texto_evento(update: Update, context: ContextTypes.DEFAULT_TYPE):
     resumen = await procesar_texto_ia(texto)
     eventos[nombre] = resumen
 
-    await update.message.reply_text(
-        f"Evento '{nombre}' guardado con resumen:\n{resumen}"
-    )
+    await update.message.reply_text(f"Evento '{nombre}' guardado con resumen:\n{resumen}")
 
 async def listar_eventos(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Muestra botones con todos los eventos"""
@@ -76,14 +67,8 @@ async def listar_eventos(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("No hay eventos guardados.")
         return
 
-    botones = [
-        [InlineKeyboardButton(nombre, callback_data=nombre)]
-        for nombre in eventos.keys()
-    ]
-    await update.message.reply_text(
-        "Selecciona un evento:",
-        reply_markup=InlineKeyboardMarkup(botones)
-    )
+    botones = [[InlineKeyboardButton(nombre, callback_data=nombre)] for nombre in eventos.keys()]
+    await update.message.reply_text("Selecciona un evento:", reply_markup=InlineKeyboardMarkup(botones))
 
 async def ver_evento(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Muestra la info del evento seleccionado"""
@@ -94,7 +79,7 @@ async def ver_evento(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await query.edit_message_text(f"Evento: {nombre}\nResumen: {info}")
 
 # --- MAIN ---
-async def main():
+def main():
     app = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
 
     app.add_handler(CommandHandler("start", start))
@@ -104,7 +89,8 @@ async def main():
     app.add_handler(CallbackQueryHandler(ver_evento))
 
     print("Bot listo")
-    await app.run_polling()
+    # ✅ NO asyncio.run() porque run_polling ya maneja el loop
+    app.run_polling()
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    main()
