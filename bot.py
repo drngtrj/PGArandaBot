@@ -14,9 +14,8 @@ TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN")
 HF_API_KEY = os.environ.get("HF_API_KEY")
 WEBHOOK_URL = os.environ.get("WEBHOOK_URL")
 
-print("HF_API_KEY:", HF_API_KEY)
 # Modelo de resumen (puedes cambiarlo si quieres otro)
-HF_MODEL = "facebook/bart-large-cnn"
+HF_MODEL = "philschmid/bart-large-cnn-samsum"
 
 
 def resumir_texto(texto):
@@ -37,7 +36,7 @@ def resumir_texto(texto):
     }
 
     try:
-        response = requests.post(API_URL, headers=headers, json=payload, timeout=30)
+        response = requests.post(API_URL, headers=headers, json=payload, timeout=60)
         result = response.json()
 
         if isinstance(result, list):
@@ -86,5 +85,6 @@ app.run_webhook(
     port=int(os.environ.get("PORT", 8000)),
     webhook_url=WEBHOOK_URL
 )
+
 
 
