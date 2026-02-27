@@ -1,12 +1,11 @@
 import os
 import requests
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram import Update
 from telegram.ext import (
     ApplicationBuilder,
     CommandHandler,
     MessageHandler,
     ContextTypes,
-    CallbackQueryHandler,
     filters
 )
 
@@ -15,14 +14,14 @@ HF_API_KEY = os.environ.get("HF_API_KEY")
 TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN")
 
 if not HF_API_KEY or not TELEGRAM_TOKEN:
-    raise RuntimeError("Faltan variables de entorno HF_API_KEY o TELEGRAM_TOKEN")
+    raise RuntimeError("Faltan variables de entorno")
 
-HF_MODEL = "google/vit-base-patch16-224"
+HF_MODEL = "Salesforce/blip-image-captioning-large"
 
 event_data = {}
 
-# ===== FUNCION IA =====
-def process_image(image_bytes):
+# ===== IA PARA IMAGEN =====
+def describir_imagen(image_bytes):
     url = f"https://api-inference.huggingface.co/models/{HF_MODEL}"
 
     headers = {
@@ -38,84 +37,94 @@ def process_image(image_bytes):
     )
 
     if response.status_code == 200:
-        return response.json()
+        result = response.json()
+        if isinstance(result, list) and "generated_text" in result[0]:
+            return result[0]["generated_text"]
+        return str(result)
     else:
-        return {"error": response.text}
+        return f"Error IA: {response.text}"
+
+
+# ===== DETECTAR EVENTO DESDE TEXTO =====
+def detectar_evento(texto):
+    """
+    Busca algo como:
+    Evento: Cumpleaños
+    evento=Reunión
+    #Boda
+    """
+    texto = texto.lower()
+
+    if "evento:" in texto:
+        return texto.split("evento:")[1].strip().split()[0]
+
+    if "evento=" in texto:
+        return texto.split("evento=")[1].strip().split()[0]
+
+    if "#" in texto:
+        return texto.split("#")[1].strip().split()[0]
+
+    return "general"
 
 
 # ===== HANDLERS =====
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
-        "Hola! Usa /evento para crear o seleccionar evento."
+        "Mándame una imagen o texto.\n"
+        "Incluye el evento así:\n"
+        "Evento: Boda\n"
+        "o\n"
+        "#Cumpleaños"
     )
 
-async def evento(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    keyboard = [
-        [InlineKeyboardButton(ev, callback_data=ev)] for ev in event_data
-    ]
-    keyboard.append([InlineKeyboardButton("Crear nuevo evento", callback_data="NEW")])
-
-    reply_markup = InlineKeyboardMarkup(keyboard)
-    await update.message.reply_text("Selecciona evento:", reply_markup=reply_markup)
-
-async def evento_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    await query.answer()
-
-    if query.data == "NEW":
-        await query.message.reply_text("Escribe el nombre del evento:")
-        context.user_data["creating_event"] = True
-    else:
-        context.user_data["evento_actual"] = query.data
-        await query.message.reply_text(f"Evento seleccionado: {query.data}")
 
 async def texto(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if context.user_data.get("creating_event"):
-        nombre = update.message.text.strip()
-        event_data[nombre] = []
-        context.user_data["evento_actual"] = nombre
-        context.user_data["creating_event"] = False
-        await update.message.reply_text(f"Evento '{nombre}' creado!")
-    else:
-        await update.message.reply_text("Envíame una imagen.")
+    contenido = update.message.text
+    evento = detectar_evento(contenido)
+
+    if evento not in event_data:
+        event_data[evento] = []
+
+    event_data[evento].append(contenido)
+
+    await update.message.reply_text(
+        f"Texto guardado en evento '{evento}' correctamente."
+    )
+
 
 async def imagen(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    evento_actual = context.user_data.get("evento_actual")
-
-    if not evento_actual:
-        await update.message.reply_text("Primero crea o selecciona un evento con /evento")
-        return
-
-    await update.message.reply_text("Procesando imagen...")
+    await update.message.reply_text("Analizando imagen...")
 
     photo_file = await update.message.photo[-1].get_file()
     image_bytes = await photo_file.download_as_bytearray()
 
-    resultado = process_image(image_bytes)
+    descripcion = describir_imagen(image_bytes)
 
-    event_data[evento_actual].append(resultado)
+    evento = detectar_evento(descripcion)
 
-    await update.message.reply_text("Imagen guardada correctamente 👍")
+    if evento not in event_data:
+        event_data[evento] = []
+
+    event_data[evento].append(descripcion)
+
+    await update.message.reply_text(
+        f"IA detectó:\n{descripcion}\n\n"
+        f"Guardado en evento '{evento}'."
+    )
 
 
 async def ver(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    evento_actual = context.user_data.get("evento_actual")
-
-    if not evento_actual:
-        await update.message.reply_text("No hay evento seleccionado.")
+    if not event_data:
+        await update.message.reply_text("No hay eventos aún.")
         return
 
-    datos = event_data.get(evento_actual, [])
+    mensaje = ""
 
-    if not datos:
-        await update.message.reply_text("Este evento no tiene datos guardados.")
-        return
-
-    mensaje = f"Datos guardados en '{evento_actual}':\n\n"
-
-    for i, item in enumerate(datos, 1):
-        mensaje += f"{i}. {item}\n\n"
+    for ev, datos in event_data.items():
+        mensaje += f"\n📌 Evento: {ev}\n"
+        for i, item in enumerate(datos, 1):
+            mensaje += f"{i}. {item}\n"
 
     await update.message.reply_text(mensaje)
 
@@ -125,9 +134,7 @@ async def ver(update: Update, context: ContextTypes.DEFAULT_TYPE):
 app = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
 
 app.add_handler(CommandHandler("start", start))
-app.add_handler(CommandHandler("evento", evento))
 app.add_handler(CommandHandler("ver", ver))
-app.add_handler(CallbackQueryHandler(evento_callback))
 app.add_handler(MessageHandler(filters.PHOTO, imagen))
 app.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), texto))
 
