@@ -11,7 +11,6 @@ from telegram.ext import (
     filters
 )
 
-# ===== CONFIG =====
 HF_API_KEY = os.environ.get("HF_API_KEY")
 TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN")
 
@@ -23,9 +22,9 @@ TEXT_MODEL = "google/flan-t5-large"
 
 event_data = {}
 
-# ===== DESCRIBIR IMAGEN =====
+# ===== DESCRIBIR IMAGEN (ROUTER NUEVO) =====
 def describir_imagen(image_bytes):
-    url = f"https://api-inference.huggingface.co/models/{VISION_MODEL}"
+    url = f"https://router.huggingface.co/hf-inference/models/{VISION_MODEL}"
 
     headers = {
         "Authorization": f"Bearer {HF_API_KEY}",
@@ -35,7 +34,7 @@ def describir_imagen(image_bytes):
     try:
         r = requests.post(url, headers=headers, data=image_bytes, timeout=120)
 
-        print("Respuesta BLIP:", r.status_code, r.text)
+        print("BLIP:", r.status_code, r.text)
 
         if r.status_code == 200:
             result = r.json()
@@ -48,9 +47,10 @@ def describir_imagen(image_bytes):
         print("Error imagen:", e)
         return None
 
-# ===== CREAR EVENTO CON IA =====
+
+# ===== CREAR EVENTO =====
 def crear_evento_con_ia(texto):
-    url = f"https://api-inference.huggingface.co/models/{TEXT_MODEL}"
+    url = f"https://router.huggingface.co/hf-inference/models/{TEXT_MODEL}"
 
     headers = {
         "Authorization": f"Bearer {HF_API_KEY}",
@@ -72,13 +72,16 @@ Contenido:
 
     payload = {
         "inputs": prompt,
-        "parameters": {"max_new_tokens": 200}
+        "parameters": {
+            "max_new_tokens": 200,
+            "temperature": 0.3
+        }
     }
 
     try:
         r = requests.post(url, headers=headers, json=payload, timeout=60)
 
-        print("Respuesta LLM:", r.status_code, r.text)
+        print("LLM:", r.status_code, r.text)
 
         if r.status_code != 200:
             return None
@@ -95,13 +98,14 @@ Contenido:
         print("Error texto:", e)
         return None
 
-# ===== HANDLERS =====
+
+# ===== BOT =====
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         "Envíame texto o imagen.\n"
         "La IA creará automáticamente el evento.\n\n"
-        "Usa /evento para ver eventos guardados."
+        "Usa /evento para ver los eventos guardados."
     )
 
 async def evento(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -116,10 +120,7 @@ async def evento(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     reply_markup = InlineKeyboardMarkup(keyboard)
 
-    await update.message.reply_text(
-        "Selecciona un evento:",
-        reply_markup=reply_markup
-    )
+    await update.message.reply_text("Selecciona un evento:", reply_markup=reply_markup)
 
 async def evento_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
@@ -154,8 +155,7 @@ async def procesar(update: Update, texto_base):
     event_data[evento_nombre].append(resumen)
 
     await update.message.reply_text(
-        f"Evento creado: {evento_nombre}\n"
-        f"Resumen: {resumen}"
+        f"Evento creado: {evento_nombre}\nResumen: {resumen}"
     )
 
 async def texto(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -174,8 +174,6 @@ async def imagen(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     await procesar(update, descripcion)
-
-# ===== MAIN =====
 
 app = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
 
