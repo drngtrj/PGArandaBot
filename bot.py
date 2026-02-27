@@ -1,188 +1,110 @@
 import os
-import requests
-import json
+import asyncio
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
-    ApplicationBuilder,
-    CommandHandler,
-    MessageHandler,
-    CallbackQueryHandler,
-    ContextTypes,
-    filters
+    ApplicationBuilder, CommandHandler, MessageHandler, ContextTypes,
+    CallbackQueryHandler, filters
 )
+import httpx
 
-HF_API_KEY = os.environ.get("HF_API_KEY")
-TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN")
+# --- CONFIG ---
+HF_API_KEY = "TU_HF_API_KEY"
+TELEGRAM_TOKEN = "TU_TELEGRAM_TOKEN"
 
-if not HF_API_KEY or not TELEGRAM_TOKEN:
-    raise RuntimeError("Faltan variables de entorno")
+# Diccionario para almacenar eventos
+eventos = {}  # { "Nombre Evento": "Resumen IA" }
 
-VISION_MODEL = "Salesforce/blip2-flan-t5-xl"
-TEXT_MODEL = "google/flan-t5-large"
-
-event_data = {}
-
-# ===== DESCRIBIR IMAGEN (ROUTER NUEVO) =====
-def describir_imagen(image_bytes):
-    url = f"https://router.huggingface.co/hf-inference/models/{VISION_MODEL}"
-
-    headers = {
-        "Authorization": f"Bearer {HF_API_KEY}",
-        "Content-Type": "application/octet-stream"
-    }
-
-    try:
-        r = requests.post(url, headers=headers, data=image_bytes, timeout=120)
-
-        print("BLIP:", r.status_code, r.text)
-
-        if r.status_code == 200:
-            result = r.json()
-            if isinstance(result, list) and "generated_text" in result[0]:
-                return result[0]["generated_text"]
-
-        return None
-
-    except Exception as e:
-        print("Error imagen:", e)
-        return None
-
-
-# ===== CREAR EVENTO =====
-def crear_evento_con_ia(texto):
-    url = f"https://router.huggingface.co/hf-inference/models/{TEXT_MODEL}"
-
-    headers = {
-        "Authorization": f"Bearer {HF_API_KEY}",
-        "Content-Type": "application/json"
-    }
-
-    prompt = f"""
-Genera un nombre corto de evento y un resumen breve.
-
-Devuelve SOLO un JSON válido así:
-{{
-"evento": "nombre_evento",
-"resumen": "descripcion"
-}}
-
-Contenido:
-{texto}
-"""
-
+# --- FUNCIONES IA ---
+async def procesar_texto_ia(texto: str) -> str:
+    """Procesa texto con HuggingFace y devuelve resumen"""
+    url = "https://api-inference.huggingface.co/models/google/flan-t5-small"
+    headers = {"Authorization": f"Bearer {HF_API_KEY}"}
     payload = {
-        "inputs": prompt,
-        "parameters": {
-            "max_new_tokens": 200,
-            "temperature": 0.3
-        }
+        "inputs": f"Resume este texto en pocas palabras: {texto}",
     }
 
     try:
-        r = requests.post(url, headers=headers, json=payload, timeout=60)
-
-        print("LLM:", r.status_code, r.text)
-
-        if r.status_code != 200:
-            return None
-
-        result = r.json()[0]["generated_text"]
-
-        inicio = result.find("{")
-        fin = result.rfind("}") + 1
-        json_str = result[inicio:fin]
-
-        return json.loads(json_str)
-
+        async with httpx.AsyncClient(timeout=30) as client:
+            r = await client.post(url, headers=headers, json=payload)
+            r.raise_for_status()
+            resultado = r.json()
+            # HuggingFace devuelve lista con 'generated_text'
+            if isinstance(resultado, list) and "generated_text" in resultado[0]:
+                return resultado[0]["generated_text"]
+            else:
+                return "No se pudo resumir el texto con IA."
     except Exception as e:
-        print("Error texto:", e)
-        return None
+        return f"No se pudo procesar con IA: {e}"
 
-
-# ===== BOT =====
-
+# --- HANDLERS ---
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
-        "Envíame texto o imagen.\n"
-        "La IA creará automáticamente el evento.\n\n"
-        "Usa /evento para ver los eventos guardados."
+        "Hola! Envía un texto describiendo un evento y la IA lo guardará."
     )
 
-async def evento(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not event_data:
+async def nuevo_evento(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Crea un nuevo evento desde el texto del usuario"""
+    if not context.args:
+        await update.message.reply_text("Usa /nuevoevento NOMBRE_DEL_EVENTO")
+        return
+
+    nombre_evento = " ".join(context.args)
+    await update.message.reply_text(f"Envíame la descripción del evento '{nombre_evento}'")
+
+    # Guardamos temporalmente el nombre del evento en context.user_data
+    context.user_data["nombre_evento"] = nombre_evento
+
+async def texto_evento(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Procesa el texto enviado por el usuario como descripción del evento"""
+    if "nombre_evento" not in context.user_data:
+        await update.message.reply_text("Primero indica el nombre del evento con /nuevoevento")
+        return
+
+    nombre = context.user_data.pop("nombre_evento")
+    texto = update.message.text
+
+    resumen = await procesar_texto_ia(texto)
+    eventos[nombre] = resumen
+
+    await update.message.reply_text(
+        f"Evento '{nombre}' guardado con resumen:\n{resumen}"
+    )
+
+async def listar_eventos(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Muestra botones con todos los eventos"""
+    if not eventos:
         await update.message.reply_text("No hay eventos guardados.")
         return
 
-    keyboard = [
-        [InlineKeyboardButton(ev, callback_data=f"ver|{ev}")]
-        for ev in event_data.keys()
+    botones = [
+        [InlineKeyboardButton(nombre, callback_data=nombre)]
+        for nombre in eventos.keys()
     ]
-
-    reply_markup = InlineKeyboardMarkup(keyboard)
-
-    await update.message.reply_text("Selecciona un evento:", reply_markup=reply_markup)
-
-async def evento_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    await query.answer()
-
-    evento_nombre = query.data.split("|")[1]
-    datos = event_data.get(evento_nombre)
-
-    if not datos:
-        await query.message.reply_text("Evento sin datos.")
-        return
-
-    mensaje = f"📌 Evento: {evento_nombre}\n\n"
-    for i, item in enumerate(datos, 1):
-        mensaje += f"{i}. {item}\n\n"
-
-    await query.message.reply_text(mensaje)
-
-async def procesar(update: Update, texto_base):
-    resultado = crear_evento_con_ia(texto_base)
-
-    if not resultado:
-        await update.message.reply_text("La IA no pudo generar el evento.")
-        return
-
-    evento_nombre = resultado["evento"].lower().strip()
-    resumen = resultado["resumen"]
-
-    if evento_nombre not in event_data:
-        event_data[evento_nombre] = []
-
-    event_data[evento_nombre].append(resumen)
-
     await update.message.reply_text(
-        f"Evento creado: {evento_nombre}\nResumen: {resumen}"
+        "Selecciona un evento:",
+        reply_markup=InlineKeyboardMarkup(botones)
     )
 
-async def texto(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await procesar(update, update.message.text)
+async def ver_evento(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Muestra la info del evento seleccionado"""
+    query = update.callback_query
+    await query.answer()
+    nombre = query.data
+    info = eventos.get(nombre, "No hay información para este evento.")
+    await query.edit_message_text(f"Evento: {nombre}\nResumen: {info}")
 
-async def imagen(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("Analizando imagen...")
+# --- MAIN ---
+async def main():
+    app = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
 
-    photo_file = await update.message.photo[-1].get_file()
-    image_bytes = await photo_file.download_as_bytearray()
+    app.add_handler(CommandHandler("start", start))
+    app.add_handler(CommandHandler("nuevoevento", nuevo_evento))
+    app.add_handler(CommandHandler("evento", listar_eventos))
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, texto_evento))
+    app.add_handler(CallbackQueryHandler(ver_evento))
 
-    descripcion = describir_imagen(image_bytes)
+    print("Bot listo")
+    await app.run_polling()
 
-    if not descripcion:
-        await update.message.reply_text("La IA de imagen no respondió.")
-        return
-
-    await procesar(update, descripcion)
-
-app = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
-
-app.add_handler(CommandHandler("start", start))
-app.add_handler(CommandHandler("evento", evento))
-app.add_handler(CallbackQueryHandler(evento_callback, pattern="^ver\\|"))
-app.add_handler(MessageHandler(filters.PHOTO, imagen))
-app.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), texto))
-
-print("Bot listo 🚀")
-app.run_polling()
-
+if __name__ == "__main__":
+    asyncio.run(main())
