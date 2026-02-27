@@ -14,7 +14,7 @@ TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN")
 HF_API_KEY = os.environ.get("HF_API_KEY")
 WEBHOOK_URL = os.environ.get("WEBHOOK_URL")
 
-HF_API_KEY = os.environ.get("HF_API_KEY")
+print("HF_API_KEY:", HF_API_KEY)
 # Modelo de resumen (puedes cambiarlo si quieres otro)
 HF_MODEL = "facebook/bart-large-cnn"
 
@@ -86,4 +86,5 @@ app.run_webhook(
     port=int(os.environ.get("PORT", 8000)),
     webhook_url=WEBHOOK_URL
 )
+
 
