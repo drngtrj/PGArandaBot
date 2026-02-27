@@ -1,6 +1,7 @@
 import os
 import requests
 import json
+import base64
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
     ApplicationBuilder,
@@ -18,13 +19,30 @@ TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN")
 if not HF_API_KEY or not TELEGRAM_TOKEN:
     raise RuntimeError("Faltan variables de entorno")
 
-HF_MODEL = "mistralai/Mistral-7B-Instruct-v0.2"
+VISION_MODEL = "Salesforce/blip-image-captioning-large"
+TEXT_MODEL = "google/flan-t5-large"
 
 event_data = {}
 
-# ===== LLAMADA IA =====
-def analizar_con_ia(texto):
-    url = f"https://api-inference.huggingface.co/models/{HF_MODEL}"
+# ===== DESCRIBIR IMAGEN =====
+def describir_imagen(image_bytes):
+    url = f"https://api-inference.huggingface.co/models/{VISION_MODEL}"
+    headers = {
+        "Authorization": f"Bearer {HF_API_KEY}",
+        "Content-Type": "application/octet-stream"
+    }
+
+    r = requests.post(url, headers=headers, data=image_bytes, timeout=60)
+
+    if r.status_code == 200:
+        result = r.json()
+        if isinstance(result, list):
+            return result[0]["generated_text"]
+    return ""
+
+# ===== CREAR EVENTO CON IA =====
+def crear_evento_con_ia(texto):
+    url = f"https://api-inference.huggingface.co/models/{TEXT_MODEL}"
 
     headers = {
         "Authorization": f"Bearer {HF_API_KEY}",
@@ -32,12 +50,13 @@ def analizar_con_ia(texto):
     }
 
     prompt = f"""
-Analiza el siguiente contenido y crea un evento.
+Analiza el siguiente contenido y genera un nombre corto de evento
+y un resumen breve.
 
-Devuelve SOLO un JSON válido con esta estructura:
+Devuelve SOLO un JSON válido así:
 {{
-  "evento": "nombre_corto_sin_espacios_raros",
-  "resumen": "descripcion_breve"
+"evento": "nombre_evento",
+"resumen": "descripcion"
 }}
 
 Contenido:
@@ -47,25 +66,26 @@ Contenido:
     payload = {
         "inputs": prompt,
         "parameters": {
-            "max_new_tokens": 200,
-            "temperature": 0.3
+            "max_new_tokens": 200
         }
     }
 
-    response = requests.post(url, headers=headers, json=payload, timeout=60)
+    r = requests.post(url, headers=headers, json=payload, timeout=60)
 
-    if response.status_code != 200:
+    if r.status_code != 200:
+        print("Error IA:", r.text)
         return None
 
-    result = response.json()
-
     try:
-        texto_generado = result[0]["generated_text"]
-        inicio = texto_generado.find("{")
-        fin = texto_generado.rfind("}") + 1
-        json_str = texto_generado[inicio:fin]
+        result = r.json()[0]["generated_text"]
+
+        inicio = result.find("{")
+        fin = result.rfind("}") + 1
+        json_str = result[inicio:fin]
+
         return json.loads(json_str)
-    except:
+    except Exception as e:
+        print("Error parseando:", e)
         return None
 
 # ===== HANDLERS =====
@@ -74,7 +94,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         "Envíame texto o imagen.\n"
         "La IA creará automáticamente el evento.\n\n"
-        "Usa /evento para ver los eventos generados."
+        "Usa /evento para ver eventos guardados."
     )
 
 async def evento(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -103,7 +123,7 @@ async def evento_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     datos = event_data.get(evento_nombre)
 
     if not datos:
-        await query.message.reply_text("Este evento no tiene datos.")
+        await query.message.reply_text("Evento sin datos.")
         return
 
     mensaje = f"📌 Evento: {evento_nombre}\n\n"
@@ -113,11 +133,11 @@ async def evento_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     await query.message.reply_text(mensaje)
 
-async def procesar_contenido(update: Update, texto_para_ia):
-    resultado = analizar_con_ia(texto_para_ia)
+async def procesar(update: Update, texto_base):
+    resultado = crear_evento_con_ia(texto_base)
 
     if not resultado:
-        await update.message.reply_text("No se pudo procesar con IA.")
+        await update.message.reply_text("La IA no respondió correctamente.")
         return
 
     evento_nombre = resultado["evento"].lower().strip()
@@ -129,27 +149,26 @@ async def procesar_contenido(update: Update, texto_para_ia):
     event_data[evento_nombre].append(resumen)
 
     await update.message.reply_text(
-        f"Evento creado por IA: {evento_nombre}\n"
+        f"Evento creado: {evento_nombre}\n"
         f"Resumen: {resumen}"
     )
 
 async def texto(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    contenido = update.message.text
-    await procesar_contenido(update, contenido)
+    await procesar(update, update.message.text)
 
 async def imagen(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("Analizando imagen con IA...")
+    await update.message.reply_text("Analizando imagen...")
 
     photo_file = await update.message.photo[-1].get_file()
     image_bytes = await photo_file.download_as_bytearray()
 
-    # Convertimos imagen a texto base64 para mandarla a IA
-    import base64
-    img_b64 = base64.b64encode(image_bytes).decode("utf-8")
+    descripcion = describir_imagen(image_bytes)
 
-    texto_para_ia = f"Imagen en base64:\n{img_b64}"
+    if not descripcion:
+        await update.message.reply_text("No se pudo describir la imagen.")
+        return
 
-    await procesar_contenido(update, texto_para_ia)
+    await procesar(update, descripcion)
 
 # ===== MAIN =====
 
