@@ -1,7 +1,6 @@
 import os
 import requests
 import json
-import base64
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
     ApplicationBuilder,
@@ -19,7 +18,7 @@ TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN")
 if not HF_API_KEY or not TELEGRAM_TOKEN:
     raise RuntimeError("Faltan variables de entorno")
 
-VISION_MODEL = "Salesforce/blip-image-captioning-large"
+VISION_MODEL = "Salesforce/blip-image-captioning-base"
 TEXT_MODEL = "google/flan-t5-large"
 
 event_data = {}
@@ -27,18 +26,27 @@ event_data = {}
 # ===== DESCRIBIR IMAGEN =====
 def describir_imagen(image_bytes):
     url = f"https://api-inference.huggingface.co/models/{VISION_MODEL}"
+
     headers = {
         "Authorization": f"Bearer {HF_API_KEY}",
         "Content-Type": "application/octet-stream"
     }
 
-    r = requests.post(url, headers=headers, data=image_bytes, timeout=60)
+    try:
+        r = requests.post(url, headers=headers, data=image_bytes, timeout=120)
 
-    if r.status_code == 200:
-        result = r.json()
-        if isinstance(result, list):
-            return result[0]["generated_text"]
-    return ""
+        print("Respuesta BLIP:", r.status_code, r.text)
+
+        if r.status_code == 200:
+            result = r.json()
+            if isinstance(result, list) and "generated_text" in result[0]:
+                return result[0]["generated_text"]
+
+        return None
+
+    except Exception as e:
+        print("Error imagen:", e)
+        return None
 
 # ===== CREAR EVENTO CON IA =====
 def crear_evento_con_ia(texto):
@@ -50,8 +58,7 @@ def crear_evento_con_ia(texto):
     }
 
     prompt = f"""
-Analiza el siguiente contenido y genera un nombre corto de evento
-y un resumen breve.
+Genera un nombre corto de evento y un resumen breve.
 
 Devuelve SOLO un JSON válido así:
 {{
@@ -65,18 +72,17 @@ Contenido:
 
     payload = {
         "inputs": prompt,
-        "parameters": {
-            "max_new_tokens": 200
-        }
+        "parameters": {"max_new_tokens": 200}
     }
 
-    r = requests.post(url, headers=headers, json=payload, timeout=60)
-
-    if r.status_code != 200:
-        print("Error IA:", r.text)
-        return None
-
     try:
+        r = requests.post(url, headers=headers, json=payload, timeout=60)
+
+        print("Respuesta LLM:", r.status_code, r.text)
+
+        if r.status_code != 200:
+            return None
+
         result = r.json()[0]["generated_text"]
 
         inicio = result.find("{")
@@ -84,8 +90,9 @@ Contenido:
         json_str = result[inicio:fin]
 
         return json.loads(json_str)
+
     except Exception as e:
-        print("Error parseando:", e)
+        print("Error texto:", e)
         return None
 
 # ===== HANDLERS =====
@@ -119,7 +126,6 @@ async def evento_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await query.answer()
 
     evento_nombre = query.data.split("|")[1]
-
     datos = event_data.get(evento_nombre)
 
     if not datos:
@@ -127,7 +133,6 @@ async def evento_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     mensaje = f"📌 Evento: {evento_nombre}\n\n"
-
     for i, item in enumerate(datos, 1):
         mensaje += f"{i}. {item}\n\n"
 
@@ -137,7 +142,7 @@ async def procesar(update: Update, texto_base):
     resultado = crear_evento_con_ia(texto_base)
 
     if not resultado:
-        await update.message.reply_text("La IA no respondió correctamente.")
+        await update.message.reply_text("La IA no pudo generar el evento.")
         return
 
     evento_nombre = resultado["evento"].lower().strip()
@@ -165,7 +170,7 @@ async def imagen(update: Update, context: ContextTypes.DEFAULT_TYPE):
     descripcion = describir_imagen(image_bytes)
 
     if not descripcion:
-        await update.message.reply_text("No se pudo describir la imagen.")
+        await update.message.reply_text("La IA de imagen no respondió.")
         return
 
     await procesar(update, descripcion)
