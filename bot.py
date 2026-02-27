@@ -5,6 +5,7 @@ from telegram.ext import (
     ContextTypes, filters
 )
 import httpx
+from telegram import BotCommand
 
 # --- CONFIG ---
 HF_API_KEY = os.environ.get("HF_API_KEY")
@@ -81,17 +82,29 @@ async def ver_evento(update: Update, context: ContextTypes.DEFAULT_TYPE):
 def main():
     app = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
 
+    # --- Handlers ---
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("nuevoevento", nuevo_evento))
     app.add_handler(CommandHandler("evento", listar_eventos))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, texto_evento))
     app.add_handler(CallbackQueryHandler(ver_evento))
 
-    print("Bot listo")
-    # ✅ NO asyncio.run() porque run_polling ya maneja el loop
-    app.run_polling()
+    # --- Registrar comandos en Telegram ---
+    async def registrar_comandos(app):
+        comandos = [
+            BotCommand("start", "Inicia el bot"),
+            BotCommand("nuevoevento", "Crear un nuevo evento"),
+            BotCommand("evento", "Ver los eventos guardados")
+        ]
+        await app.bot.set_my_commands(comandos)
 
+    app.post_init = registrar_comandos  # Esto se ejecuta al iniciar el bot
+
+    print("Bot listo")
+    app.run_polling()
+    
 if __name__ == "__main__":
     main()
+
 
 
