@@ -1,90 +1,65 @@
 import os
 import requests
-from telegram import Update
-from telegram.ext import (
-    ApplicationBuilder,
-    MessageHandler,
-    CommandHandler,
-    filters,
-    ContextTypes,
-)
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram.ext import ApplicationBuilder, CommandHandler, CallbackQueryHandler, ContextTypes, MessageHandler, filters
 
-# Variables de entorno
-TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN")
-HF_API_KEY = os.environ.get("HF_API_KEY")
-WEBHOOK_URL = os.environ.get("WEBHOOK_URL")
-
-# Modelo de resumen (puedes cambiarlo si quieres otro)
+# --- CONFIG ---
+HF_API_TOKEN = os.environ.get("HF_API_TOKEN")
 HF_MODEL = "philschmid/bart-large-cnn-samsum"
+API_URL = f"https://api-inference.huggingface.co/models/{HF_MODEL}"
+HEADERS = {"Authorization": f"Bearer {HF_API_TOKEN}"}
 
+# Diccionario para almacenar eventos y datos
+eventos = {}  # { "NombreEvento": {datos} }
 
-def resumir_texto(texto):
-    API_URL = f"https://router.huggingface.co/hf-inference/models/{HF_MODEL}"
-
-    headers = {
-        "Authorization": f"Bearer {HF_API_KEY}",
-        "Content-Type": "application/json"
-    }
-
-    payload = {
-        "inputs": texto,
-        "parameters": {
-            "max_length": 130,
-            "min_length": 30,
-            "do_sample": False
-        }
-    }
-
+# --- FUNCIONES ---
+def extraer_datos(texto: str):
+    payload = {"inputs": texto}
     try:
-        response = requests.post(API_URL, headers=headers, json=payload, timeout=60)
-        result = response.json()
-
-        if isinstance(result, list):
-            return result[0]["summary_text"]
-        else:
-            return f"Error IA: {result}"
-
+        r = requests.post(API_URL, headers=HEADERS, json=payload, timeout=60)
+        r.raise_for_status()
+        return r.json()[0]["summary_text"]  # O ajusta según el modelo que uses
     except Exception as e:
-        return f"Error técnico: {str(e)}"
+        return f"Error IA: {e}"
 
-
-# Comando /start
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text(
-        "Mándame un texto largo y te lo resumo al tiro 🔥"
-    )
+    await update.message.reply_text("Manda los datos del evento y lo guardaré 📝")
 
-
-# Responder a mensajes normales
-async def responder(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not update.message or not update.message.text:
-        return
-
+async def nuevo_evento(update: Update, context: ContextTypes.DEFAULT_TYPE):
     texto = update.message.text
+    resumen = extraer_datos(texto)
+    
+    # Guardamos en diccionario
+    nombre_evento = f"Evento{len(eventos)+1}"
+    eventos[nombre_evento] = {
+        "original": texto,
+        "resumen": resumen
+    }
+    
+    await update.message.reply_text(f"Datos guardados para {nombre_evento} ✅\nResumen: {resumen}")
 
-    if len(texto) < 50:
-        await update.message.reply_text("Eso está muy corto pa resumir 😅")
-        return
+    # Mostramos menú
+    botones = [[InlineKeyboardButton(ev, callback_data=ev)] for ev in eventos]
+    keyboard = InlineKeyboardMarkup(botones)
+    await update.message.reply_text("Elige un evento para ver los datos:", reply_markup=keyboard)
 
-    await update.message.reply_text("Dame un segundo que estoy pensando... 🧠")
+async def menu_evento(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    
+    evento = query.data
+    datos = eventos.get(evento, {})
+    if datos:
+        await query.edit_message_text(
+            f"Datos de {evento}:\n\nOriginal: {datos['original']}\nResumen: {datos['resumen']}"
+        )
+    else:
+        await query.edit_message_text("Evento no encontrado ❌")
 
-    resumen = resumir_texto(texto)
-
-    await update.message.reply_text(resumen)
-
-
-# Crear app
-app = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
-
+# --- APP ---
+app = ApplicationBuilder().token(os.environ["TELEGRAM_TOKEN"]).build()
 app.add_handler(CommandHandler("start", start))
-app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, responder))
+app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, nuevo_evento))
+app.add_handler(CallbackQueryHandler(menu_evento))
 
-# Ejecutar webhook (Railway)
-app.run_webhook(
-    listen="0.0.0.0",
-    port=int(os.environ.get("PORT", 8000)),
-    webhook_url=WEBHOOK_URL
-)
-
-
-
+app.run_polling()
