@@ -1,65 +1,100 @@
 import os
-import requests
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import ApplicationBuilder, CommandHandler, CallbackQueryHandler, ContextTypes, MessageHandler, filters
+from telegram.ext import (
+    ApplicationBuilder, CommandHandler, MessageHandler, CallbackQueryHandler,
+    ContextTypes, filters
+)
+from PIL import Image
+import pytesseract
+import requests
+from io import BytesIO
 
-# --- CONFIG ---
-HF_API_TOKEN = os.environ.get("HF_API_TOKEN")
-HF_MODEL = "philschmid/bart-large-cnn-samsum"
-API_URL = f"https://api-inference.huggingface.co/models/{HF_MODEL}"
-HEADERS = {"Authorization": f"Bearer {HF_API_TOKEN}"}
+# Diccionario para guardar eventos
+eventos = {}
 
-# Diccionario para almacenar eventos y datos
-eventos = {}  # { "NombreEvento": {datos} }
-
-# --- FUNCIONES ---
-def extraer_datos(texto: str):
-    payload = {"inputs": texto}
-    try:
-        r = requests.post(API_URL, headers=HEADERS, json=payload, timeout=60)
-        r.raise_for_status()
-        return r.json()[0]["summary_text"]  # O ajusta según el modelo que uses
-    except Exception as e:
-        return f"Error IA: {e}"
-
+# Comando /start
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("Manda los datos del evento y lo guardaré 📝")
+    keyboard = [[InlineKeyboardButton("Ver eventos", callback_data="ver_eventos")]]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    await update.message.reply_text(
+        "¡Hola! Puedes enviarme texto o imágenes de eventos y los guardo.\n"
+        "Usa el menú para ver tus eventos.",
+        reply_markup=reply_markup
+    )
 
-async def nuevo_evento(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    texto = update.message.text
-    resumen = extraer_datos(texto)
-    
-    # Guardamos en diccionario
-    nombre_evento = f"Evento{len(eventos)+1}"
-    eventos[nombre_evento] = {
-        "original": texto,
-        "resumen": resumen
-    }
-    
-    await update.message.reply_text(f"Datos guardados para {nombre_evento} ✅\nResumen: {resumen}")
+# Comando para ver los eventos directamente
+async def ver_eventos_comando(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if eventos:
+        lista = "\n".join(eventos.keys())
+        await update.message.reply_text(f"Eventos guardados:\n{lista}")
+    else:
+        await update.message.reply_text("No hay eventos guardados aún ❌")
 
-    # Mostramos menú
-    botones = [[InlineKeyboardButton(ev, callback_data=ev)] for ev in eventos]
-    keyboard = InlineKeyboardMarkup(botones)
-    await update.message.reply_text("Elige un evento para ver los datos:", reply_markup=keyboard)
-
-async def menu_evento(update: Update, context: ContextTypes.DEFAULT_TYPE):
+# Callback del menú
+async def menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
-    
-    evento = query.data
-    datos = eventos.get(evento, {})
-    if datos:
-        await query.edit_message_text(
-            f"Datos de {evento}:\n\nOriginal: {datos['original']}\nResumen: {datos['resumen']}"
-        )
-    else:
-        await query.edit_message_text("Evento no encontrado ❌")
+    if query.data == "ver_eventos":
+        if eventos:
+            keyboard = [
+                [InlineKeyboardButton(name, callback_data=f"evento_{name}")]
+                for name in eventos
+            ]
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            await query.edit_message_text("Elige un evento:", reply_markup=reply_markup)
+        else:
+            await query.edit_message_text("No hay eventos guardados aún ❌")
+    elif query.data.startswith("evento_"):
+        nombre_evento = query.data.split("_", 1)[1]
+        datos = eventos.get(nombre_evento, "No hay datos")
+        await query.edit_message_text(f"Evento: {nombre_evento}\nDatos:\n{datos}")
 
-# --- APP ---
-app = ApplicationBuilder().token(os.environ["TELEGRAM_TOKEN"]).build()
-app.add_handler(CommandHandler("start", start))
-app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, nuevo_evento))
-app.add_handler(CallbackQueryHandler(menu_evento))
+# Función para guardar texto
+async def nuevo_evento(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    texto = update.message.text
+    if not texto.strip():
+        return
+    nombre_evento = f"Evento {len(eventos)+1}"
+    eventos[nombre_evento] = texto
+    await update.message.reply_text(f"Guardé tu evento '{nombre_evento}' ✅")
 
-app.run_polling()
+# Función para procesar imagen
+async def imagen_evento(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    photo_file = await update.message.photo[-1].get_file()
+    photo_bytes = BytesIO()
+    await photo_file.download(out=photo_bytes)
+    photo_bytes.seek(0)
+
+    try:
+        img = Image.open(photo_bytes)
+        texto = pytesseract.image_to_string(img)
+        if texto.strip():
+            nombre_evento = f"Evento {len(eventos)+1}"
+            eventos[nombre_evento] = texto
+            await update.message.reply_text(f"Guardé tu evento de la imagen '{nombre_evento}' ✅")
+        else:
+            await update.message.reply_text("No pude extraer texto de la imagen 😕")
+    except Exception as e:
+        await update.message.reply_text(f"Error procesando la imagen: {e}")
+
+# Main
+async def main():
+    TOKEN = os.environ.get("BOT_TOKEN")
+    if not TOKEN:
+        print("Debes configurar BOT_TOKEN en las variables de entorno")
+        return
+
+    app = ApplicationBuilder().token(TOKEN).build()
+
+    app.add_handler(CommandHandler("start", start))
+    app.add_handler(CommandHandler("ver_eventos", ver_eventos_comando))
+    app.add_handler(CallbackQueryHandler(menu_callback))
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, nuevo_evento))
+    app.add_handler(MessageHandler(filters.PHOTO, imagen_evento))
+
+    print("Bot listo")
+    await app.run_polling()
+
+if __name__ == "__main__":
+    import asyncio
+    asyncio.run(main())
