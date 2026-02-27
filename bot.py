@@ -1,7 +1,6 @@
 import os
 from telegram import Update
 from telegram.ext import ApplicationBuilder, MessageHandler, filters, ContextTypes
-from openai import OpenAI
 
 # Tokens y claves
 TELEGRAM_TOKEN = os.environ["TELEGRAM_TOKEN"]
@@ -37,4 +36,5 @@ app.run_webhook(
     port=int(os.environ.get("PORT", 8000)),
     webhook_url=WEBHOOK_URL
 )
+
 
