@@ -17,7 +17,7 @@ TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN")
 if not HF_API_KEY or not TELEGRAM_TOKEN:
     raise RuntimeError("Faltan variables de entorno")
 
-VISION_MODEL = "Salesforce/blip-image-captioning-base"
+VISION_MODEL = "Salesforce/blip2-flan-t5-xl"
 TEXT_MODEL = "google/flan-t5-large"
 
 event_data = {}
@@ -185,3 +185,4 @@ app.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), texto))
 
 print("Bot listo 🚀")
 app.run_polling()
+
