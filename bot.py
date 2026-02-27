@@ -13,9 +13,9 @@ import io
 import requests
 
 # --- CONFIG ---
-HF_API_KEY = "hf_XXXXXXXXXXXXXXXXXXXX"   # Tu Hugging Face API Key
-TELEGRAM_TOKEN = "YOUR_TELEGRAM_BOT_TOKEN"
-WEBHOOK_URL = "https://tu-dominio.com/hook"  # Solo si usas webhook
+HF_API_KEY = os.environ.get("HF_API_KEY")
+TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN")
+WEBHOOK_URL = os.environ.get("WEBHOOK_URL")  # Solo si usas webhook
 
 # Almacenamiento en memoria (puede pasar a DB si quieres)
 event_data = {}  # {'Evento 1': [imagenes y datos], 'Evento 2': [...]}
@@ -115,3 +115,4 @@ app.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), mensaje_texto)
 # Corremos el bot (polling)
 print("Bot listo")
 app.run_polling()
+
