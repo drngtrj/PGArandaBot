@@ -1,10 +1,11 @@
 import os
 import requests
-from telegram import Update
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
     ApplicationBuilder,
     CommandHandler,
     MessageHandler,
+    CallbackQueryHandler,
     ContextTypes,
     filters
 )
@@ -18,9 +19,10 @@ if not HF_API_KEY or not TELEGRAM_TOKEN:
 
 HF_MODEL = "Salesforce/blip-image-captioning-large"
 
+# Base en memoria
 event_data = {}
 
-# ===== IA PARA IMAGEN =====
+# ===== IA IMAGEN =====
 def describir_imagen(image_bytes):
     url = f"https://api-inference.huggingface.co/models/{HF_MODEL}"
 
@@ -44,54 +46,79 @@ def describir_imagen(image_bytes):
     else:
         return f"Error IA: {response.text}"
 
-
-# ===== DETECTAR EVENTO DESDE TEXTO =====
+# ===== DETECTAR EVENTO =====
 def detectar_evento(texto):
-    """
-    Busca algo como:
-    Evento: Cumpleaños
-    evento=Reunión
-    #Boda
-    """
-    texto = texto.lower()
+    texto_lower = texto.lower()
 
-    if "evento:" in texto:
-        return texto.split("evento:")[1].strip().split()[0]
-
-    if "evento=" in texto:
-        return texto.split("evento=")[1].strip().split()[0]
+    if "evento:" in texto_lower:
+        return texto_lower.split("evento:")[1].strip().split()[0]
 
     if "#" in texto:
         return texto.split("#")[1].strip().split()[0]
 
     return "general"
 
-
 # ===== HANDLERS =====
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
-        "Mándame una imagen o texto.\n"
+        "Envíame texto o imagen.\n"
         "Incluye el evento así:\n"
         "Evento: Boda\n"
         "o\n"
-        "#Cumpleaños"
+        "#Cumpleaños\n\n"
+        "Usa /evento para ver los eventos guardados."
     )
 
+# 🔹 ESTE ES EL NUEVO /evento
+async def evento(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not event_data:
+        await update.message.reply_text("No hay eventos creados aún.")
+        return
+
+    keyboard = [
+        [InlineKeyboardButton(ev, callback_data=f"ver_{ev}")]
+        for ev in event_data.keys()
+    ]
+
+    reply_markup = InlineKeyboardMarkup(keyboard)
+
+    await update.message.reply_text(
+        "Selecciona un evento para ver su información:",
+        reply_markup=reply_markup
+    )
+
+async def evento_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+
+    evento_nombre = query.data.replace("ver_", "")
+
+    datos = event_data.get(evento_nombre, [])
+
+    if not datos:
+        await query.message.reply_text("Este evento no tiene información.")
+        return
+
+    mensaje = f"📌 Evento: {evento_nombre}\n\n"
+
+    for i, item in enumerate(datos, 1):
+        mensaje += f"{i}. {item}\n\n"
+
+    await query.message.reply_text(mensaje)
 
 async def texto(update: Update, context: ContextTypes.DEFAULT_TYPE):
     contenido = update.message.text
-    evento = detectar_evento(contenido)
+    evento_nombre = detectar_evento(contenido)
 
-    if evento not in event_data:
-        event_data[evento] = []
+    if evento_nombre not in event_data:
+        event_data[evento_nombre] = []
 
-    event_data[evento].append(contenido)
+    event_data[evento_nombre].append(contenido)
 
     await update.message.reply_text(
-        f"Texto guardado en evento '{evento}' correctamente."
+        f"Texto guardado en evento '{evento_nombre}'."
     )
-
 
 async def imagen(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("Analizando imagen...")
@@ -101,40 +128,25 @@ async def imagen(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     descripcion = describir_imagen(image_bytes)
 
-    evento = detectar_evento(descripcion)
+    evento_nombre = detectar_evento(descripcion)
 
-    if evento not in event_data:
-        event_data[evento] = []
+    if evento_nombre not in event_data:
+        event_data[evento_nombre] = []
 
-    event_data[evento].append(descripcion)
+    event_data[evento_nombre].append(descripcion)
 
     await update.message.reply_text(
         f"IA detectó:\n{descripcion}\n\n"
-        f"Guardado en evento '{evento}'."
+        f"Guardado en evento '{evento_nombre}'."
     )
-
-
-async def ver(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not event_data:
-        await update.message.reply_text("No hay eventos aún.")
-        return
-
-    mensaje = ""
-
-    for ev, datos in event_data.items():
-        mensaje += f"\n📌 Evento: {ev}\n"
-        for i, item in enumerate(datos, 1):
-            mensaje += f"{i}. {item}\n"
-
-    await update.message.reply_text(mensaje)
-
 
 # ===== MAIN =====
 
 app = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
 
 app.add_handler(CommandHandler("start", start))
-app.add_handler(CommandHandler("ver", ver))
+app.add_handler(CommandHandler("evento", evento))
+app.add_handler(CallbackQueryHandler(evento_callback, pattern="^ver_"))
 app.add_handler(MessageHandler(filters.PHOTO, imagen))
 app.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), texto))
 
