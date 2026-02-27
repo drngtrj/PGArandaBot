@@ -2,3 +2,4 @@ python-telegram-bot[webhooks]==22.5.0
 requests
 pillow
 pytesseract
+aiohttp
