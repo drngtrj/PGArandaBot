@@ -17,12 +17,11 @@ TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN")
 if not HF_API_KEY or not TELEGRAM_TOKEN:
     raise RuntimeError("Faltan variables de entorno HF_API_KEY o TELEGRAM_TOKEN")
 
-# Modelo que SÍ funciona con imágenes
 HF_MODEL = "google/vit-base-patch16-224"
 
 event_data = {}
 
-# ===== FUNCION IA CORREGIDA =====
+# ===== FUNCION IA =====
 def process_image(image_bytes):
     url = f"https://api-inference.huggingface.co/models/{HF_MODEL}"
 
@@ -48,7 +47,7 @@ def process_image(image_bytes):
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
-        "Hola compa! Usa /evento para crear o seleccionar evento."
+        "Hola! Usa /evento para crear o seleccionar evento."
     )
 
 async def evento(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -79,7 +78,7 @@ async def texto(update: Update, context: ContextTypes.DEFAULT_TYPE):
         context.user_data["creating_event"] = False
         await update.message.reply_text(f"Evento '{nombre}' creado!")
     else:
-        await update.message.reply_text("Envíame una imagen mejor 😉")
+        await update.message.reply_text("Envíame una imagen.")
 
 async def imagen(update: Update, context: ContextTypes.DEFAULT_TYPE):
     evento_actual = context.user_data.get("evento_actual")
@@ -88,6 +87,8 @@ async def imagen(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("Primero crea o selecciona un evento con /evento")
         return
 
+    await update.message.reply_text("Procesando imagen...")
+
     photo_file = await update.message.photo[-1].get_file()
     image_bytes = await photo_file.download_as_bytearray()
 
@@ -95,9 +96,29 @@ async def imagen(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     event_data[evento_actual].append(resultado)
 
-    await update.message.reply_text(
-        f"Imagen procesada en evento '{evento_actual}'\n\nResultado IA:\n{resultado}"
-    )
+    await update.message.reply_text("Imagen guardada correctamente 👍")
+
+
+async def ver(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    evento_actual = context.user_data.get("evento_actual")
+
+    if not evento_actual:
+        await update.message.reply_text("No hay evento seleccionado.")
+        return
+
+    datos = event_data.get(evento_actual, [])
+
+    if not datos:
+        await update.message.reply_text("Este evento no tiene datos guardados.")
+        return
+
+    mensaje = f"Datos guardados en '{evento_actual}':\n\n"
+
+    for i, item in enumerate(datos, 1):
+        mensaje += f"{i}. {item}\n\n"
+
+    await update.message.reply_text(mensaje)
+
 
 # ===== MAIN =====
 
@@ -105,6 +126,7 @@ app = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
 
 app.add_handler(CommandHandler("start", start))
 app.add_handler(CommandHandler("evento", evento))
+app.add_handler(CommandHandler("ver", ver))
 app.add_handler(CallbackQueryHandler(evento_callback))
 app.add_handler(MessageHandler(filters.PHOTO, imagen))
 app.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), texto))
