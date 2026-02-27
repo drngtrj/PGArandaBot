@@ -7,16 +7,6 @@ from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, CallbackQueryHandler, ContextTypes, filters
 from telegram import BotCommand
 
-# Lista de comandos que quieres que aparezcan
-comandos = [
-    BotCommand("start", "Inicia el bot"),
-    BotCommand("evento", "Crea o selecciona un evento"),
-    BotCommand("menu", "Muestra el menú de eventos"),
-    BotCommand("datos", "Muestra los datos del evento actual")
-]
-
-# Registrar comandos en Telegram
-app.bot.set_my_commands(comandos)
 # ---------------- Configuración ----------------
 HF_API_KEY = os.environ["HF_API_KEY"]
 TELEGRAM_TOKEN = os.environ["TELEGRAM_TOKEN"]
@@ -133,6 +123,9 @@ app.add_handler(CommandHandler("evento", crear_evento))
 app.add_handler(CommandHandler("menu", mostrar_eventos))
 app.add_handler(CommandHandler("datos", listar_datos))
 
+# Registrar comandos en Telegram
+app.bot.set_my_commands(comandos)
+
 # Callbacks
 app.add_handler(CallbackQueryHandler(seleccionar_evento))
 
@@ -151,4 +144,5 @@ if __name__ == "__main__":
     #     port=int(os.environ.get("PORT", 8000)),
     #     webhook_url=WEBHOOK_URL
     # )
+
 
