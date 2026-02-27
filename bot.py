@@ -7,8 +7,8 @@ from telegram.ext import (
 import httpx
 
 # --- CONFIG ---
-HF_API_KEY = "TU_HF_API_KEY"
-TELEGRAM_TOKEN = "TU_TELEGRAM_TOKEN"
+HF_API_KEY = os.environ.get("HF_API_KEY")
+TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN")
 
 # Diccionario para almacenar eventos
 eventos = {}  # { "Nombre Evento": "Resumen IA" }
@@ -94,3 +94,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
