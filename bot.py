@@ -44,7 +44,6 @@ async def nuevo_evento(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     nombre_evento = " ".join(context.args)
-    await update.message.reply_text(f"Envíame la descripción del evento '{nombre_evento}'")
     context.user_data["nombre_evento"] = nombre_evento
 
 async def texto_evento(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -94,4 +93,5 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
