@@ -1,150 +1,141 @@
 import os
 import logging
-from io import BytesIO
+import aiohttp
 from PIL import Image
-import requests
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, CallbackQueryHandler, ContextTypes, filters
-from telegram import BotCommand
+from io import BytesIO
+from telegram import (
+    BotCommand,
+    InlineKeyboardButton,
+    InlineKeyboardMarkup,
+    Update
+)
+from telegram.ext import (
+    ApplicationBuilder,
+    CommandHandler,
+    CallbackQueryHandler,
+    MessageHandler,
+    filters,
+    ContextTypes
+)
 
-# ---------------- Configuración ----------------
-HF_API_KEY = os.environ["HF_API_KEY"]
-TELEGRAM_TOKEN = os.environ["TELEGRAM_TOKEN"]
-WEBHOOK_URL = os.environ.get("WEBHOOK_URL")  # opcional si vas a webhook
+# --- Configuración ---
+HF_API_KEY = os.environ.get("HF_API_KEY")
+TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN")
+WEBHOOK_URL = os.environ.get("WEBHOOK_URL")  # si usas webhook
 
-HEADERS = {"Authorization": f"Bearer {HF_API_KEY}"}
+if not HF_API_KEY or not TELEGRAM_TOKEN:
+    raise RuntimeError("Debes configurar HF_API_KEY y TELEGRAM_TOKEN en variables de entorno")
 
-# Logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# ---------------- Datos ----------------
-# Diccionario de eventos -> lista de datos guardados
-eventos = {}
+# --- Base de datos en memoria ---
+eventos = {}  # formato: {"nombre_evento": {"datos": [...] } }
 
-# Variable para saber con qué evento estamos trabajando
-evento_actual = None
-
-# ---------------- Funciones HF ----------------
-def enviar_a_hf(texto=None, imagen_bytes=None):
-    """
-    Envía texto o imagen a Hugging Face Inference API.
-    """
-    url = "https://router.huggingface.co/models/gpt-4o-mini"
+# --- Función para llamar a Hugging Face ---
+async def procesar_ia(prompt=None, image_bytes=None):
+    url = "https://router.huggingface.co/models/gpt-4o-mini"  # modelo de ejemplo
+    headers = {"Authorization": f"Bearer {HF_API_KEY}"}
     payload = {}
+    if prompt:
+        payload["inputs"] = prompt
+    elif image_bytes:
+        payload["inputs"] = image_bytes  # depende del modelo, aquí ejemplo simplificado
 
-    if texto:
-        payload["inputs"] = texto
-    elif imagen_bytes:
-        files = {"image": ("image.png", imagen_bytes)}
-        response = requests.post(url, headers=HEADERS, files=files, timeout=30)
-        if response.status_code != 200:
-            return f"Error IA: {response.json()}"
-        return response.json().get("generated_text", "No se pudo generar texto de la imagen.")
-    else:
-        return "No hay datos para procesar."
+    async with aiohttp.ClientSession() as session:
+        async with session.post(url, headers=headers, json=payload, timeout=60) as resp:
+            if resp.status == 200:
+                result = await resp.json()
+                return result.get("generated_text", "No se generó respuesta")
+            else:
+                return f"Error IA: {await resp.text()}"
 
-    response = requests.post(url, headers=HEADERS, json=payload, timeout=30)
-    if response.status_code != 200:
-        return f"Error IA: {response.json()}"
-    return response.json().get("generated_text", "No se pudo generar respuesta.")
-
-
-# ---------------- Handlers ----------------
+# --- Handlers de comandos ---
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text(
-        "¡Hola! Soy tu bot. Primero crea o selecciona un evento usando /evento <nombre_evento>."
-    )
-
-async def crear_evento(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    global evento_actual
-    if not context.args:
-        await update.message.reply_text("Debes poner un nombre de evento: /evento NombreDelEvento")
-        return
-    nombre_evento = " ".join(context.args)
-    if nombre_evento not in eventos:
-        eventos[nombre_evento] = []
-    evento_actual = nombre_evento
-    await update.message.reply_text(f"Evento seleccionado: {evento_actual}")
-
-async def mostrar_eventos(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not eventos:
-        await update.message.reply_text("No hay eventos creados todavía.")
-        return
-    teclado = [
-        [InlineKeyboardButton(nombre, callback_data=nombre)] for nombre in eventos.keys()
+    botones = [
+        [InlineKeyboardButton("Crear evento", callback_data="evento_crear")],
+        [InlineKeyboardButton("Listar eventos", callback_data="evento_listar")],
+        [InlineKeyboardButton("Borrar evento", callback_data="evento_borrar")]
     ]
-    reply_markup = InlineKeyboardMarkup(teclado)
-    await update.message.reply_text("Selecciona un evento:", reply_markup=reply_markup)
+    markup = InlineKeyboardMarkup(botones)
+    await update.message.reply_text("Bienvenido al bot! Elige una opción:", reply_markup=markup)
 
-async def seleccionar_evento(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    global evento_actual
+async def eventos_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
-    evento_actual = query.data
-    await query.edit_message_text(text=f"Evento seleccionado: {evento_actual}")
+    if query.data == "evento_crear":
+        await query.message.reply_text("Envíame el nombre del evento:")
+        context.user_data["modo_evento"] = "crear"
+    elif query.data == "evento_listar":
+        if eventos:
+            lista = "\n".join(eventos.keys())
+            await query.message.reply_text(f"Eventos guardados:\n{lista}")
+        else:
+            await query.message.reply_text("No hay eventos guardados.")
+    elif query.data == "evento_borrar":
+        if eventos:
+            botones = [[InlineKeyboardButton(name, callback_data=f"borrar_{name}")] for name in eventos.keys()]
+            markup = InlineKeyboardMarkup(botones)
+            await query.message.reply_text("Elige evento a borrar:", reply_markup=markup)
+        else:
+            await query.message.reply_text("No hay eventos para borrar.")
 
-async def manejar_mensaje(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    global evento_actual
-    if evento_actual is None:
-        await update.message.reply_text("Primero selecciona un evento con /evento o /menu")
-        return
-
-    if update.message.photo:
-        # Procesar imagen
-        photo_file = await update.message.photo[-1].get_file()
-        photo_bytes = await photo_file.download_as_bytearray()
-        resultado = enviar_a_hf(imagen_bytes=photo_bytes)
-        eventos[evento_actual].append({"tipo": "imagen", "contenido": resultado})
-        await update.message.reply_text(f"Procesé la imagen para el evento {evento_actual}:\n{resultado}")
+async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_text = update.message.text
+    modo = context.user_data.get("modo_evento")
+    if modo == "crear":
+        eventos[user_text] = {"datos": []}
+        await update.message.reply_text(f"Evento '{user_text}' creado!")
+        context.user_data["modo_evento"] = None
     else:
-        texto = update.message.text
-        resultado = enviar_a_hf(texto=texto)
-        eventos[evento_actual].append({"tipo": "texto", "contenido": resultado})
-        await update.message.reply_text(f"Procesé el texto para el evento {evento_actual}:\n{resultado}")
+        respuesta = await procesar_ia(prompt=user_text)
+        await update.message.reply_text(f"IA dice: {respuesta}")
 
-async def listar_datos(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if evento_actual is None:
-        await update.message.reply_text("Primero selecciona un evento con /evento o /menu")
-        return
-    datos = eventos.get(evento_actual, [])
-    if not datos:
-        await update.message.reply_text(f"No hay datos guardados para el evento {evento_actual}")
-        return
-    mensaje = "\n\n".join([f"{i+1}. [{d['tipo']}] {d['contenido']}" for i, d in enumerate(datos)])
-    await update.message.reply_text(f"Datos del evento {evento_actual}:\n{mensaje}")
+async def image_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    photo_file = await update.message.photo[-1].get_file()
+    photo_bytes = BytesIO()
+    await photo_file.download_to_memory(out=photo_bytes)
+    photo_bytes.seek(0)
+    respuesta = await procesar_ia(image_bytes=photo_bytes.read())
+    await update.message.reply_text(f"IA dice: {respuesta}")
 
-# ---------------- Main ----------------
-app = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
+async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    data = query.data
+    if data.startswith("borrar_"):
+        nombre = data.replace("borrar_", "")
+        if nombre in eventos:
+            del eventos[nombre]
+            await query.message.reply_text(f"Evento '{nombre}' borrado!")
+        else:
+            await query.message.reply_text("Evento no encontrado.")
 
-# Comandos
-comandos = [
+# --- Main ---
+async def main():
+    app = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
+
+    # Comandos básicos
     app.add_handler(CommandHandler("start", start))
-    app.add_handler(CommandHandler("evento", crear_evento))
-    app.add_handler(CommandHandler("menu", mostrar_eventos))
-    app.add_handler(CommandHandler("datos", listar_datos))
-]
-# Registrar comandos en Telegram
-app.bot.set_my_commands(comandos)
+    app.add_handler(CallbackQueryHandler(eventos_menu))
+    app.add_handler(CallbackQueryHandler(callback_handler, pattern=r"borrar_"))
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, text_handler))
+    app.add_handler(MessageHandler(filters.PHOTO, image_handler))
 
-# Callbacks
-app.add_handler(CallbackQueryHandler(seleccionar_evento))
+    # Opcional: setear menú de comandos en Telegram
+    await app.bot.set_my_commands([
+        BotCommand("start", "Inicia el bot"),
+    ])
 
-# Mensajes
-app.add_handler(MessageHandler(filters.TEXT | filters.PHOTO, manejar_mensaje))
+    # Run
+    if WEBHOOK_URL:
+        await app.run_webhook(
+            listen="0.0.0.0",
+            port=int(os.environ.get("PORT", 8000)),
+            webhook_url=WEBHOOK_URL
+        )
+    else:
+        await app.run_polling()
 
-# ---------------- Run ----------------
-if __name__ == "__main__":
-    # Para polling
-    print("Bot listo")
-    app.run_polling()
-    
-    # Para webhook, descomenta esto:
-    # app.run_webhook(
-    #     listen="0.0.0.0",
-    #     port=int(os.environ.get("PORT", 8000)),
-    #     webhook_url=WEBHOOK_URL
-    # )
-
-
-
+import asyncio
+asyncio.run(main())
